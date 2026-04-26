@@ -109,6 +109,10 @@ export default async function handler(req: any, res: any) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
 
   if (req.method === "OPTIONS") {
     res.status(204).end();
@@ -118,19 +122,37 @@ export default async function handler(req: any, res: any) {
   const url = new URL(req.url!, `http://${req.headers.host}`);
 
   if (url.pathname === "/sse" || url.pathname === "/") {
+    console.log("New SSE connection attempt");
     const transport = new SSEServerTransport("/messages", res);
     const sessionId = transport.sessionId;
     transports[sessionId] = transport;
+    
     const server = createServer();
     await server.connect(transport);
-    req.on("close", () => { delete transports[sessionId]; });
+    
+    console.log(`SSE connection established for session: ${sessionId}`);
+    
+    req.on("close", () => {
+      console.log(`SSE connection closed for session: ${sessionId}`);
+      delete transports[sessionId];
+    });
   } else if (url.pathname === "/messages") {
     const sessionId = url.searchParams.get("sessionId");
+    console.log(`Message received for session: ${sessionId}`);
+    
     if (!sessionId || !transports[sessionId]) {
+      console.error(`Invalid or missing sessionId: ${sessionId}`);
       res.status(400).json({ error: "Invalid or missing sessionId" });
       return;
     }
-    await transports[sessionId].handlePostMessage(req, res);
+    
+    try {
+      await transports[sessionId].handlePostMessage(req, res);
+      console.log(`Message handled for session: ${sessionId}`);
+    } catch (error) {
+      console.error(`Error handling message for session ${sessionId}:`, error);
+      res.status(500).json({ error: "Internal server error handling message" });
+    }
   } else {
     res.status(200).json({
       name: "meetgeek-mcp-server",
